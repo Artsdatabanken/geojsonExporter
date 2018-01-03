@@ -4,7 +4,6 @@ using System.Data;
 using System.Data.SqlClient;
 using System.Linq;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Serialization;
 
 namespace geojsonExporter
 {
@@ -17,6 +16,9 @@ namespace geojsonExporter
             var naturområdeTyper = ReadAll<NaturområdeType>("NaturområdeType");
             var beskrivelsesVariabler = ReadAll<Beskrivelsesvariabel>("Beskrivelsesvariabel");
             var naturområder = ReadAll<NaturområdeJson>("Naturområde");
+            var rødlistekategori = ReadAll<Rødlistekategori>("Rødlistekategori");
+            var kategoriSet = ReadAll<KategoriSet>("KategoriSet");
+
             var geometries = ReadGeometries();
 
             var root = new root();
@@ -35,6 +37,8 @@ namespace geojsonExporter
 
                 AddNaturområdeTyper(naturområdeTyper, naturområdeJson);
 
+                AddRødlistekategori(rødlistekategori, kategoriSet, naturområdeJson);
+
                 root.features.Add(naturområdeJson);
 
                 i++;
@@ -44,6 +48,18 @@ namespace geojsonExporter
             var json = JsonConvert.SerializeObject(root).Replace("\"[[[", "[[[").Replace("]]]\"", "]]]");
 
 
+        }
+
+        private static void AddRødlistekategori(IEnumerable<Rødlistekategori> rødlistekategori, IReadOnlyCollection<KategoriSet> kategoriSet, NaturområdeJson naturområdeJson)
+        {
+            var rødlistekategoris = rødlistekategori as Rødlistekategori[] ?? rødlistekategori.ToArray();
+            if (rødlistekategoris.All(r => r.naturområde_id != naturområdeJson.Id)) return;
+
+            foreach (var r in rødlistekategoris.Where(r => r.naturområde_id == naturområdeJson.Id))
+            {
+                naturområdeJson.Properties["RØ_" + kategoriSet.First(k => k.Id == r.kategori_id).verdi] = 0;
+            }
+            
 
         }
 
@@ -108,6 +124,19 @@ namespace geojsonExporter
                 return db.Query<T>("SELECT * FROM " + tableName).ToList();
             }
         }
+    }
+
+    public class KategoriSet
+    {
+        public int Id { get; set; }
+        public string verdi { get; set; }
+    }
+
+    public class Rødlistekategori
+    {
+        public int kategori_id { get; set; }
+        public int naturområde_id { get; set; }
+
     }
 
     public class Beskrivelsesvariabel
