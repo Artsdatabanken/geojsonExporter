@@ -3,6 +3,7 @@ using Dapper;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
+using System.Dynamic;
 using System.IO;
 using System.Linq;
 using GeoAPI.CoordinateSystems.Transformations;
@@ -31,7 +32,7 @@ namespace geojsonExporter
 
             var naturområdeTyper = ReadAll<NaturområdeType>("NaturområdeType");
             var beskrivelsesVariabler = ReadAll<Beskrivelsesvariabel>("Beskrivelsesvariabel");
-            var naturområder = ReadAll<NaturområdeJson>("Naturområde");
+            var naturområder = ReadAll<Naturområde>("Naturområde");
             var rødlistekategori = ReadAll<Rødlistekategori>("Rødlistekategori");
             var kategoriSet = ReadAll<KategoriSet>("KategoriSet");
 
@@ -40,61 +41,78 @@ namespace geojsonExporter
             var root = new root();
 
             var i = 0;
-            foreach (var naturområdeJson in naturområder)
+
+            foreach (var naturområde in naturområder)
             {
-                if (naturområdeTyper.All(n => n.Naturområde_id != naturområdeJson.Id) &&
-                    beskrivelsesVariabler.All(b => b.Naturområde_id != naturområdeJson.Id)) continue;
+                if (naturområdeTyper.All(n => n.Naturområde_id != naturområde.Id) &&
+                    beskrivelsesVariabler.All(b => b.Naturområde_id != naturområde.Id)) continue;
 
-                //if (i > 100) break;
+                if (i == 1) break;
 
-                naturområdeJson.Geometry = ConvertToJson(geometries.First(g => g.Id == naturområdeJson.Id));
+                var flexible = GenerateFlexible(geometries, naturområde);
 
-                AddBeskrivelsesVariabler(beskrivelsesVariabler, naturområdeJson);
+                AddBeskrivelsesVariabler(beskrivelsesVariabler, flexible);
 
-                AddNaturområdeTyper(naturområdeTyper, naturområdeJson);
+                AddNaturområdeTyper(naturområdeTyper, flexible);
 
-                AddRødlistekategori(rødlistekategori, kategoriSet, naturområdeJson);
+                AddRødlistekategori(rødlistekategori, kategoriSet, flexible);
 
-                root.features.Add(naturområdeJson);
+                root.features.Add(flexible);
 
                 i++;
 
+                Console.Write("\r{0}%   ", (1.0*i/naturområder.Count)*100);
             }
 
-            var json = JsonConvert.SerializeObject(root).Replace("\"[[[", "[[[").Replace("]]]}\"", "]]]");
+            var json = JsonConvert.SerializeObject(root);
 
             File.WriteAllText(@"c:\tmp\naturomrader3.json", json);
 
 
         }
 
-        private static void AddRødlistekategori(IEnumerable<Rødlistekategori> rødlistekategori, IReadOnlyCollection<KategoriSet> kategoriSet, NaturområdeJson naturområdeJson)
+        private static dynamic GenerateFlexible(IEnumerable<Geometry> geometries, Naturområde naturområde)
+        {
+            dynamic flexible = new ExpandoObject();
+
+            flexible.type = "Feature";
+
+            flexible.geometry = ConvertToJson(geometries.First(g => g.Id == naturområde.Id));
+
+            flexible.properties = new Dictionary<string, string>();
+
+            flexible.Id = naturområde.Id;
+
+            return flexible;
+        }
+
+        private static void AddRødlistekategori(IEnumerable<Rødlistekategori> rødlistekategori, IReadOnlyCollection<KategoriSet> kategoriSet, dynamic naturområdeJson)
         {
             var rødlistekategoris = rødlistekategori as Rødlistekategori[] ?? rødlistekategori.ToArray();
             if (rødlistekategoris.All(r => r.naturområde_id != naturområdeJson.Id)) return;
 
             foreach (var r in rødlistekategoris.Where(r => r.naturområde_id == naturområdeJson.Id))
             {
-                naturområdeJson.Properties["RØ_" + kategoriSet.First(k => k.Id == r.kategori_id).verdi] = "0";
+                naturområdeJson.properties["RKAT_" + kategoriSet.First(k => k.Id == r.kategori_id).verdi] = "null";
             }
             
 
         }
 
         private static void AddNaturområdeTyper(IReadOnlyCollection<NaturområdeType> naturområdeTyper,
-            NaturområdeJson naturområdeJson)
+            dynamic naturområdeJson)
         {
             if (naturområdeTyper.All(n => n.Naturområde_id != naturområdeJson.Id)) return;
             {
                 foreach (var naturområdeType in naturområdeTyper.Where(n => n.Naturområde_id == naturområdeJson.Id))
                 {
-                    naturområdeJson.Properties[naturområdeType.Kode] = naturområdeType.Andel.ToString();
+                    naturområdeJson.properties[naturområdeType.Kode] = naturområdeType.Andel.ToString();
                 }
             }
         }
 
         private static void AddBeskrivelsesVariabler(IReadOnlyCollection<Beskrivelsesvariabel> beskrivelsesVariabler,
-            NaturområdeJson naturområdeJson)
+            dynamic naturområdeJson)
         {
             // Hvis starter med tall, splitt på underscore, ellers på bindestrek
             if (beskrivelsesVariabler.All(b => b.Naturområde_id != naturområdeJson.Id)) return;
@@ -106,28 +124,22 @@ namespace geojsonExporter
                     {
                         if (char.IsNumber(codePart.ToCharArray()[0]))
                         {
-                            if (codePart.Contains("XY"))
+                            if (codePart.Contains("_"))
                             {
-                                naturområdeJson.Properties[codePart.Split("XY")[0]] = "XY";
+                                var parts = codePart.Trim().Split('_');
+                                naturområdeJson.properties[parts[0]] = parts[1];
                             }
                             else
                             {
-                                var parts = codePart.Trim().Split('_');
-                                naturområdeJson.Properties[parts[0]] = parts[1];
+                                naturområdeJson.properties[codePart] = "null";
                             }
                         }
 
                         else
                         {
                             var parts = codePart.Trim().Split('-');
-                            try
-                            {
-                                naturområdeJson.Properties[parts[0]] = parts[1];
-                            }
-                            catch 
-                            {
-                                Console.WriteLine("Beskrivelsesvariabel matcher ikke mønster: " + beskrivelsesVariabel + "for naturområde med Id " + naturområdeJson.Id);
-                            }
+                            if (parts.Length > 1) naturområdeJson.properties[parts[0]] = parts[1];
+                            else naturområdeJson.properties[parts[0]] = "null";
                         }
 
                     }
@@ -135,19 +147,20 @@ namespace geojsonExporter
             }
         }
 
-        private static Dictionary<string, string> ConvertToJson(Geometry geometry)
+        private static object ConvertToJson(Geometry geometry)
         {
-            var geom = (Polygon)Reader.Read(geometry.WKB);
+            var geom = Reader.Read(geometry.WKB);
 
-            TransformRing(geom.Boundary);
-
-            foreach (var geomInteriorRing in geom.InteriorRings) TransformRing(geomInteriorRing);
-            
-            return new Dictionary<string, string>
+            for (var i = 0; i < geom.NumGeometries; i++)
             {
-                {"type", geometry.GeometryType},
-                {"coordinates", "[[[" + Writer.Write(geom).Split("[[[")[1]}
-            };
+                TransformRing(((Polygon)geom.GetGeometryN(i)).Boundary);
+
+                foreach (var geomInteriorRing in ((Polygon)geom.GetGeometryN(i)).InteriorRings) TransformRing(geomInteriorRing);
+            }
+
+            if(geom.IsValid) return JsonConvert.DeserializeObject(Writer.Write(geom));
+
+            throw new Exception();
         }
 
         private static void TransformRing(IGeometry ring)
@@ -211,13 +224,9 @@ namespace geojsonExporter
         public int Naturområde_id { get; set; }
     }
 
-    public class NaturområdeJson
+    public class Naturområde
     {
-        public string type = "Feature";
-        public Dictionary<string, string> Geometry = new Dictionary<string, string>();
         public int Id { get; set; }
-        public Dictionary<string, string> Properties = new Dictionary<string, string>();
-        //public crs crs = new crs();
     }
 
     public class Geometry
@@ -227,20 +236,9 @@ namespace geojsonExporter
         public byte[] WKB { get; set; }
     }
 
-    public class crs
-    {
-        public string type = "name";
-
-        public Dictionary<string, string> properties = new Dictionary<string, string>
-        {
-            {"name", "EPSG:32633"}
-        };
-    }
-
     public class root
     {
         public string type = "FeatureCollection";
-        public List<NaturområdeJson> features = new List<NaturområdeJson>();
+        public List<ExpandoObject> features = new List<ExpandoObject>();
     }
-
 }
