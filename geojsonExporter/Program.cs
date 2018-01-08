@@ -69,14 +69,14 @@ namespace geojsonExporter
                     continue;
                 }
 
-                
 
-                Console.Write("\r{0}%   ", (1.0*i/ geometries.Count)*100);
+                if (i % 100 == 0 && i != 0)
+                    Console.Write("\r{0}%   ", (int)(1.0*i/ geometries.Count*100));
             }
 
             var json = JsonConvert.SerializeObject(root);
 
-            File.WriteAllText(@"c:\tmp\naturomrader4.json", json);
+            File.WriteAllText(@"c:\tmp\naturomrader5.json", json);
 
 
         }
@@ -88,6 +88,8 @@ namespace geojsonExporter
             flexible.type = "Feature";
 
             flexible.properties = new Dictionary<string, string>();
+
+            flexible.properties["localId"] = naturområde.localId.ToString();
 
             flexible.geometry = ConvertToJson(naturområde.WKB);
 
@@ -162,7 +164,7 @@ namespace geojsonExporter
             
             if (!geom.IsValid) throw new Exception();
 
-            return JsonConvert.DeserializeObject(Writer.Write(geom));
+            //return JsonConvert.DeserializeObject(Writer.Write(geom));
 
             for (var i = 0; i < geom.NumGeometries; i++)
             {
@@ -197,7 +199,7 @@ namespace geojsonExporter
         {
             using (IDbConnection db = new SqlConnection(ConnStr))
             {
-                return db.Query<Naturområde>("SELECT id, geometri.STGeometryType() as GeometryType, geometri.STAsBinary() as WKB FROM Naturområde").ToList();
+                return db.Query<Naturområde>("SELECT id, geometri.STGeometryType() as GeometryType, geometri.STAsBinary() as WKB, localId FROM Naturområde").ToList();
             }
         }
 
@@ -259,6 +261,7 @@ namespace geojsonExporter
         public int Id { get; set; }
         public string GeometryType { get; set; }
         public byte[] WKB { get; set; }
+        public object localId { get; set; }
     }
 
     public class root
