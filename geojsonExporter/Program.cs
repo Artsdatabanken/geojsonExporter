@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using Dapper;
 using System.Collections.Generic;
 using System.Data;
@@ -6,6 +7,8 @@ using System.Data.SqlClient;
 using System.Dynamic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using GeoAPI.CoordinateSystems.Transformations;
 using GeoAPI.Geometries;
 using NetTopologySuite.Geometries;
@@ -41,14 +44,12 @@ namespace geojsonExporter
 
             var i = 0;
 
-            foreach (var naturområde in geometries)
+            Parallel.ForEach(geometries, naturområde =>
             {
-                i++;
+                Interlocked.Increment(ref i);
 
                 if (naturområdeTyper.All(n => n.Naturområde_id != naturområde.Id) &&
-                    beskrivelsesVariabler.All(b => b.Naturområde_id != naturområde.Id)) continue;
-
-                //if (i > 100) break;
+                    beskrivelsesVariabler.All(b => b.Naturområde_id != naturområde.Id)) return;
 
                 try
                 {
@@ -64,15 +65,15 @@ namespace geojsonExporter
                 }
                 catch (Exception e)
                 {
-                    Console.Write("ERROR: Something went wrong with Id " + naturområde.Id);
+                    Console.Write("ERROR: Id " + naturområde.Id + " ." + e.Message);
                     Console.WriteLine();
-                    continue;
+                    return;
                 }
 
 
                 if (i % 100 == 0 && i != 0)
                     Console.Write("\r{0}%   ", (int)(1.0*i/ geometries.Count*100));
-            }
+            });
 
             var json = JsonConvert.SerializeObject(root);
 
@@ -176,7 +177,7 @@ namespace geojsonExporter
 
             
 
-            throw new Exception();
+            throw new Exception("Something went wrong when reprojecting");
         }
 
         private static void TransformRing(IGeometry ring)
@@ -268,6 +269,6 @@ namespace geojsonExporter
     {
         public string type = "FeatureCollection";
         public Crs crs = new Crs();
-        public List<ExpandoObject> features = new List<ExpandoObject>();
+        public ConcurrentBag<ExpandoObject> features = new ConcurrentBag<ExpandoObject>();
     }
 }
