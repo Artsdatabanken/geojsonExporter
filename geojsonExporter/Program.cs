@@ -65,7 +65,7 @@ namespace geojsonExporter
                 }
                 catch (Exception e)
                 {
-                    Console.Write("ERROR: Id " + naturområde.Id + " ." + e.Message);
+                    Console.Write("ERROR: Id " + naturområde.Id + ". " + e.Message);
                     Console.WriteLine();
                     return;
                 }
@@ -77,7 +77,7 @@ namespace geojsonExporter
 
             var json = JsonConvert.SerializeObject(root);
 
-            File.WriteAllText(@"c:\tmp\naturomrader5.json", json);
+            File.WriteAllText(@"c:\tmp\naturomrader6.json", json);
 
 
         }
@@ -119,6 +119,11 @@ namespace geojsonExporter
                 foreach (var naturområdeType in naturområdeTyper.Where(n => n.Naturområde_id == naturområdeJson.id))
                 {
                     naturområdeJson.properties[naturområdeType.Kode] = naturområdeType.Andel.ToString();
+                    var mainType = naturområdeType.Kode.Substring(0, 4);
+                    naturområdeJson.properties[mainType] = "null";
+                    var subType = naturområdeType.Kode.Split('-')[0];
+                    naturområdeJson.properties[subType] = "null";
+
                 }
             }
         }
