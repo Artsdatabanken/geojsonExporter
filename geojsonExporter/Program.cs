@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using Dapper;
 using System.Collections.Generic;
 using System.Data;
@@ -6,6 +7,8 @@ using System.Data.SqlClient;
 using System.Dynamic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using GeoAPI.CoordinateSystems.Transformations;
 using GeoAPI.Geometries;
 using NetTopologySuite.Geometries;
@@ -33,6 +36,7 @@ namespace geojsonExporter
             var beskrivelsesVariabler = ReadAll<Beskrivelsesvariabel>("Beskrivelsesvariabel");
             var rødlistekategori = ReadAll<Rødlistekategori>("Rødlistekategori");
             var kategoriSet = ReadAll<KategoriSet>("KategoriSet");
+            var rødlisteVurderingsenhetSet = ReadAll<RødlisteVurderingsenhetSet>("RødlisteVurderingsenhetSet");
 
             var geometries = ReadGeometries();
 
@@ -40,14 +44,12 @@ namespace geojsonExporter
 
             var i = 0;
 
-            foreach (var naturområde in geometries)
+            Parallel.ForEach(geometries, naturområde =>
             {
-                i++;
+                Interlocked.Increment(ref i);
 
                 if (naturområdeTyper.All(n => n.Naturområde_id != naturområde.Id) &&
-                    beskrivelsesVariabler.All(b => b.Naturområde_id != naturområde.Id)) continue;
-
-                //if (i > 100) break;
+                    beskrivelsesVariabler.All(b => b.Naturområde_id != naturområde.Id)) return;
 
                 try
                 {
@@ -57,23 +59,25 @@ namespace geojsonExporter
 
                     AddNaturområdeTyper(naturområdeTyper, flexible);
 
-                    AddRødlistekategori(rødlistekategori, kategoriSet, flexible);
+                    AddRødlistekategori(rødlisteVurderingsenhetSet, rødlistekategori, kategoriSet, flexible);
 
                     root.features.Add(flexible);
                 }
                 catch (Exception e)
                 {
-                    continue;
+                    Console.Write("ERROR: Id " + naturområde.Id + ". " + e.Message);
+                    Console.WriteLine();
+                    return;
                 }
 
-                
 
-                Console.Write("\r{0}%   ", (1.0*i/ geometries.Count)*100);
-            }
+                if (i % 100 == 0 && i != 0)
+                    Console.Write("\r{0}%   ", (int)(1.0*i/ geometries.Count*100));
+            });
 
             var json = JsonConvert.SerializeObject(root);
 
-            File.WriteAllText(@"c:\tmp\naturomrader3.json", json);
+            File.WriteAllText(@"c:\tmp\naturomrader6.json", json);
 
 
         }
@@ -86,6 +90,8 @@ namespace geojsonExporter
 
             flexible.properties = new Dictionary<string, string>();
 
+            flexible.properties["localId"] = naturområde.localId.ToString();
+
             flexible.geometry = ConvertToJson(naturområde.WKB);
 
             flexible.id = naturområde.Id;
@@ -93,14 +99,13 @@ namespace geojsonExporter
             return flexible;
         }
 
-        private static void AddRødlistekategori(IEnumerable<Rødlistekategori> rødlistekategori, IReadOnlyCollection<KategoriSet> kategoriSet, dynamic naturområdeJson)
+        private static void AddRødlistekategori(List<RødlisteVurderingsenhetSet> rødlisteVurderingsenhetSet, List<Rødlistekategori> rødlistekategori, IReadOnlyCollection<KategoriSet> kategoriSet, dynamic naturområdeJson)
         {
-            var rødlistekategoris = rødlistekategori as Rødlistekategori[] ?? rødlistekategori.ToArray();
-            if (rødlistekategoris.All(r => r.naturområde_id != naturområdeJson.id)) return;
+            if (rødlistekategori.All(r => r.naturområde_id != naturområdeJson.id)) return;
 
-            foreach (var r in rødlistekategoris.Where(r => r.naturområde_id == naturområdeJson.id))
+            foreach (var r in rødlistekategori.Where(r => r.naturområde_id == naturområdeJson.id))
             {
-                naturområdeJson.properties["RKAT_" + kategoriSet.First(k => k.Id == r.kategori_id).verdi] = "null";
+                naturområdeJson.properties["RKAT_" + kategoriSet.First(k => k.Id == r.kategori_id).verdi] = rødlisteVurderingsenhetSet.First( rv => rv.id == r.rødlistevurderingsenhet_id).verdi;
             }
             
 
@@ -114,6 +119,11 @@ namespace geojsonExporter
                 foreach (var naturområdeType in naturområdeTyper.Where(n => n.Naturområde_id == naturområdeJson.id))
                 {
                     naturområdeJson.properties[naturområdeType.Kode] = naturområdeType.Andel.ToString();
+                    var mainType = naturområdeType.Kode.Substring(0, 4);
+                    naturområdeJson.properties[mainType] = "null";
+                    var subType = naturområdeType.Kode.Split('-')[0];
+                    naturområdeJson.properties[subType] = "null";
+
                 }
             }
         }
@@ -160,6 +170,8 @@ namespace geojsonExporter
             
             if (!geom.IsValid) throw new Exception();
 
+            //return JsonConvert.DeserializeObject(Writer.Write(geom));
+
             for (var i = 0; i < geom.NumGeometries; i++)
             {
                 TransformRing(((Polygon)geom.GetGeometryN(i)).Boundary);
@@ -170,7 +182,7 @@ namespace geojsonExporter
 
             
 
-            throw new Exception();
+            throw new Exception("Something went wrong when reprojecting");
         }
 
         private static void TransformRing(IGeometry ring)
@@ -193,7 +205,7 @@ namespace geojsonExporter
         {
             using (IDbConnection db = new SqlConnection(ConnStr))
             {
-                return db.Query<Naturområde>("SELECT id, geometri.STGeometryType() as GeometryType, geometri.STAsBinary() as WKB FROM Naturområde").ToList();
+                return db.Query<Naturområde>("SELECT id, geometri.STGeometryType() as GeometryType, geometri.STAsBinary() as WKB, localId FROM Naturområde").ToList();
             }
         }
 
@@ -204,6 +216,12 @@ namespace geojsonExporter
                 return db.Query<T>("SELECT * FROM " + tableName).ToList();
             }
         }
+    }
+
+    public class RødlisteVurderingsenhetSet
+    {
+        public int id { get; set; }
+        public string verdi { get; set; }
     }
 
     public class Crs
@@ -225,6 +243,7 @@ namespace geojsonExporter
     {
         public int kategori_id { get; set; }
         public int naturområde_id { get; set; }
+        public int rødlistevurderingsenhet_id { get; set; }
 
     }
 
@@ -248,12 +267,13 @@ namespace geojsonExporter
         public int Id { get; set; }
         public string GeometryType { get; set; }
         public byte[] WKB { get; set; }
+        public object localId { get; set; }
     }
 
     public class root
     {
         public string type = "FeatureCollection";
         public Crs crs = new Crs();
-        public List<ExpandoObject> features = new List<ExpandoObject>();
+        public ConcurrentBag<ExpandoObject> features = new ConcurrentBag<ExpandoObject>();
     }
 }
