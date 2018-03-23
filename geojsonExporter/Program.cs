@@ -25,6 +25,8 @@ namespace geojsonExporter
         private static readonly GeoJsonWriter Writer = new GeoJsonWriter();
         private static readonly WKBReader Reader = new WKBReader();
         private static ICoordinateTransformation _trans;
+        private const string RødlistePrefix = "rl_";
+        private const string BeskrivelsesVariabelPrefix = "bs_";
 
         public static void Main(string[] args)
         {
@@ -77,7 +79,7 @@ namespace geojsonExporter
 
             var json = JsonConvert.SerializeObject(root);
 
-            File.WriteAllText(@"c:\tmp\naturomrader6.json", json);
+            File.WriteAllText(@"c:\tmp\naturomrader8.json", json);
 
 
         }
@@ -105,7 +107,7 @@ namespace geojsonExporter
 
             foreach (var r in rødlistekategori.Where(r => r.naturområde_id == naturområdeJson.id))
             {
-                naturområdeJson.properties["RKAT_" + kategoriSet.First(k => k.Id == r.kategori_id).verdi] = rødlisteVurderingsenhetSet.First( rv => rv.id == r.rødlistevurderingsenhet_id).verdi;
+                naturområdeJson.properties[RødlistePrefix + kategoriSet.First(k => k.Id == r.kategori_id).verdi] = rødlisteVurderingsenhetSet.First( rv => rv.id == r.rødlistevurderingsenhet_id).verdi;
             }
             
 
@@ -118,10 +120,10 @@ namespace geojsonExporter
             {
                 foreach (var naturområdeType in naturområdeTyper.Where(n => n.Naturområde_id == naturområdeJson.id))
                 {
-                    naturområdeJson.properties[naturområdeType.Kode] = naturområdeType.Andel.ToString();
-                    var mainType = naturområdeType.Kode.Substring(0, 4);
+                    naturområdeJson.properties[naturområdeType.Kode.ToLower()] = naturområdeType.Andel.ToString();
+                    var mainType = naturområdeType.Kode.Substring(0, 4).ToLower();
                     naturområdeJson.properties[mainType] = "null";
-                    var subType = naturområdeType.Kode.Split('-')[0];
+                    var subType = naturområdeType.Kode.Split('-')[0].ToLower();
                     naturområdeJson.properties[subType] = "null";
 
                 }
@@ -144,19 +146,19 @@ namespace geojsonExporter
                             if (codePart.Contains("_"))
                             {
                                 var parts = codePart.Trim().Split('_');
-                                naturområdeJson.properties[parts[0]] = parts[1];
+                                naturområdeJson.properties[BeskrivelsesVariabelPrefix + parts[0].ToLower()] = parts[1].ToLower();
                             }
                             else
                             {
-                                naturområdeJson.properties[codePart] = "null";
+                                naturområdeJson.properties[BeskrivelsesVariabelPrefix + codePart.ToLower()] = "null";
                             }
                         }
 
                         else
                         {
                             var parts = codePart.Trim().Split('-');
-                            if (parts.Length > 1) naturområdeJson.properties[parts[0]] = parts[1];
-                            else naturområdeJson.properties[parts[0]] = "null";
+                            if (parts.Length > 1) naturområdeJson.properties[BeskrivelsesVariabelPrefix + parts[0].ToLower()] = parts[1].ToLower();
+                            else naturområdeJson.properties[BeskrivelsesVariabelPrefix + parts[0].ToLower()] = "null";
                         }
 
                     }
