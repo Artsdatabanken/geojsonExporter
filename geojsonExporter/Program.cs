@@ -25,8 +25,8 @@ namespace geojsonExporter
         private static readonly GeoJsonWriter Writer = new GeoJsonWriter();
         private static readonly WKBReader Reader = new WKBReader();
         private static ICoordinateTransformation _trans;
-        private const string RødlistePrefix = "rl_";
-        private const string BeskrivelsesVariabelPrefix = "bs_";
+        private const string RødlistePrefix = "rl";
+        private const string BeskrivelsesVariabelPrefix = "bs";
 
         public static void Main(string[] args)
         {
@@ -79,7 +79,7 @@ namespace geojsonExporter
 
             var json = JsonConvert.SerializeObject(root);
 
-            File.WriteAllText(@"c:\tmp\naturomrader8.json", json);
+            File.WriteAllText(@"c:\tmp\naturomrader9.json", json);
 
 
         }
@@ -105,9 +105,11 @@ namespace geojsonExporter
         {
             if (rødlistekategori.All(r => r.naturområde_id != naturområdeJson.id)) return;
 
+            naturområdeJson.properties[RødlistePrefix] = "null";
+
             foreach (var r in rødlistekategori.Where(r => r.naturområde_id == naturområdeJson.id))
             {
-                naturområdeJson.properties[RødlistePrefix + kategoriSet.First(k => k.Id == r.kategori_id).verdi] = rødlisteVurderingsenhetSet.First( rv => rv.id == r.rødlistevurderingsenhet_id).verdi;
+                naturområdeJson.properties[RødlistePrefix + "_" + kategoriSet.First(k => k.Id == r.kategori_id).verdi.ToLower()] = rødlisteVurderingsenhetSet.First( rv => rv.id == r.rødlistevurderingsenhet_id).verdi;
             }
             
 
@@ -125,7 +127,6 @@ namespace geojsonExporter
                     naturområdeJson.properties[mainType] = "null";
                     var subType = naturområdeType.Kode.Split('-')[0].ToLower();
                     naturområdeJson.properties[subType] = "null";
-
                 }
             }
         }
@@ -141,26 +142,28 @@ namespace geojsonExporter
                 {
                     foreach (var codePart in beskrivelsesVariabel.Split(","))
                     {
-                        if (char.IsNumber(codePart.ToCharArray()[0]))
+                        var codePartLower = codePart.ToLower();
+                        var tempString = BeskrivelsesVariabelPrefix;
+                        naturområdeJson.properties[tempString] = "null";
+
+                        var codePartSplit = codePartLower.Split('-');
+                        for (var i = 0; i < codePartSplit.Length; i++)
                         {
-                            if (codePart.Contains("_"))
-                            {
-                                var parts = codePart.Trim().Split('_');
-                                naturområdeJson.properties[BeskrivelsesVariabelPrefix + parts[0].ToLower()] = parts[1].ToLower();
-                            }
+                            //if (codePartSplit[i] == "x") continue;
+
+                            if (i == 0) tempString += "_" + codePartSplit[i];
                             else
                             {
-                                naturområdeJson.properties[BeskrivelsesVariabelPrefix + codePart.ToLower()] = "null";
+                                var codePartSplitUnderscore = codePartSplit[i].Split('_');
+
+                                if (codePartSplitUnderscore.Length > 1)
+                                    naturområdeJson.properties[tempString + "-" + codePartSplitUnderscore[0]]
+                                        = "null";
+
+                                tempString += "-" + codePartSplit[i];
                             }
+                            naturområdeJson.properties[tempString] = "null";
                         }
-
-                        else
-                        {
-                            var parts = codePart.Trim().Split('-');
-                            if (parts.Length > 1) naturområdeJson.properties[BeskrivelsesVariabelPrefix + parts[0].ToLower()] = parts[1].ToLower();
-                            else naturområdeJson.properties[BeskrivelsesVariabelPrefix + parts[0].ToLower()] = "null";
-                        }
-
                     }
                 }
             }
